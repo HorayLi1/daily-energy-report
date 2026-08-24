@@ -1,36 +1,33 @@
 name: 每日新能源早报
-run‑name: ${{ github.workflow }}‑${{ github.sha }}
 
 on:
+  workflow_dispatch:
   schedule:
-    # Cron 【UTC时间！比北京时间晚8小时】北京时间早上7点 = UTC 23点
-    - cron: "0 23 * * *"
-  workflow_dispatch: # 支持网页手动点击运行测试
+    - cron: '0 0 * * *'
 
 jobs:
   build:
-    runs‑on: ubuntu‑latest
+    runs-on: ubuntu-latest
     steps:
-      ‑ name: 检出代码
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      ‑ name: 设置Python
-        uses: actions/setup‑python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python‑version: "3.12"
-          cache: "pip"
+          python-version: "3.11"
 
-      ‑ name: 安装依赖
-        run: pip install ‑r requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
-      ‑ name: 运行脚本
+      - name: Run script
         env:
           COZE_PAT: ${{ secrets.COZE_PAT }}
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
         run: python main.py
 
-      ‑ name: 部署Github Pages
-        uses: peaceiris/actions‑gh‑pages@v4
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./
