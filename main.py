@@ -8,7 +8,7 @@ COZE_PAT = os.environ.get("COZE_PAT")
 PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN")
 
 # 你的Github Pages公开访问链接，替换为你的用户名
-GITHUB_USER = "你的github用户名"
+GITHUB_USER = "HorayLi1"
 PUBLIC_HTML_URL = f"https://{GITHUB_USER}.github.io/daily-energy-report/energy_daily_card.html"
 OUTPUT_HTML_FILE = "energy_daily_card.html"
 
