@@ -26,6 +26,7 @@ jobs:
         env:
           COZE_PAT: ${{ secrets.COZE_PAT }}
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          COZE_BOT_ID: ${{ secrets.COZE_BOT_ID }}
         run: python main.py
 
       - name: 部署页面
