@@ -4,6 +4,14 @@ from datetime import datetime
 import os
 import time
 
+#====调试打印====
+print(f"[DEBUG] COZE_BOT_ID raw value: {repr(os.environ.get('COZE_BOT_ID'))}")
+print(f"[DEBUG] COZE_PAT is None? {os.environ.get('COZE_PAT') is None}")
+#================
+
+
+
+
 # ============ 环境变量密钥，从Github Actions Secrets读取 ============
 COZE_PAT = os.environ.get("COZE_PAT")
 COZE_BOT_ID = os.environ.get("COZE_BOT_ID")
