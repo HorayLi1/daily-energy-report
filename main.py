@@ -40,15 +40,26 @@ def fetch_news_from_coze():
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "coze‑3.5‑pro",
+        # 全部改为英文半角短横线！！！
+        "model": "coze-3.5-pro",
         "messages": [
             {"role":"system","content":SYSTEM_PROMPT},
-            {"role":"user","content":f"生成{datetime.now().strftime('%Y‑%m‑%d')}新能源早报新闻数据"}
+            {"role":"user","content":f"生成{datetime.now().strftime('%Y-%m-%d')}新能源早报新闻数据"}
         ],
         "tools": [{"type":"web_search","web_search":{"enable":True}}]
     }
     resp = requests.post(COZE_API_URL, json=payload, headers=headers)
     res_json = resp.json()
+    # 打印调试信息，看接口返回
+    print(f"HTTP status:{resp.status_code}")
+    print(f"Coze返回完整json:{res_json}")
+
+    # 容错判断
+    if "error" in res_json:
+        raise Exception(f"Coze接口报错：{res_json['error']}")
+    if "choices" not in res_json:
+        raise Exception(f"无choices字段，响应：{res_json}")
+
     content = res_json["choices"][0]["message"]["content"]
     data = json.loads(content)
     return data
