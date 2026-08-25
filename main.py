@@ -3,7 +3,6 @@ import time
 import requests
 import os
 
-# 从GitHub Actions环境变量读取密钥，不要硬编码
 COZE_PAT = os.getenv("COZE_PAT")
 COZE_BOT_ID = os.getenv("COZE_BOT_ID")
 PUSHPLUS_TOKEN = os.getenv("PUSHPLUS_TOKEN")
@@ -42,13 +41,16 @@ def fetch_news_from_coze():
     start_time = time.time()
     result_content = None
 
-    # 完整带容错轮询逻辑【修复接口地址】
     while True:
         if time.time() - start_time > max_wait_time:
             raise TimeoutError("Coze接口轮询超时，超过2分钟未返回结果")
 
         poll_url = "https://api.coze.cn/v3/chat/retrieve"
-        params = {"chat_id": chat_id}
+        # 两个参数都必须带上
+        params = {
+            "chat_id": chat_id,
+            "conversation_id": conversation_id
+        }
         poll_resp = requests.get(poll_url, headers=headers, params=params)
         poll_data = poll_resp.json()
         print(f"[DEBUG]轮询原始响应: {poll_data}")
@@ -80,7 +82,6 @@ def fetch_news_from_coze():
 
 
 def render_markdown(news_data):
-    """把json新闻数据渲染成markdown早报"""
     md_lines = []
     md_lines.append(f"# 新能源每日早报 {time.strftime('%Y‑%m‑%d')}\n")
 
@@ -116,7 +117,6 @@ def render_markdown(news_data):
 
 
 def push_plus_send(content):
-    """pushplus微信推送，不需要推送可以注释调用"""
     if not PUSHPLUS_TOKEN:
         print("[INFO]未配置PUSHPLUS_TOKEN，跳过微信推送")
         return
@@ -141,7 +141,6 @@ if __name__ == "__main__":
     print("2.渲染Markdown报告")
     report_md = render_markdown(news_data)
 
-    # 输出到本地文件
     with open("daily_report.md", "w", encoding="utf‑8") as f:
         f.write(report_md)
     print("[INFO]已生成 daily_report.md")
