@@ -28,60 +28,75 @@ HEADERS = {
 }
 
 
+import json
+import time
+import requests
+import os
+
+COZE_PAT = os.getenv("COZE_PAT")
+COZE_BOT_ID = os.getenv("COZE_BOT_ID")
+
 def fetch_news_from_coze():
-    """调用扣子v3 chat接口获取早报JSON，Bot网页端存放完整System Prompt"""
-    chat_url = "https://api.coze.cn/v3/chat"
+    headers = {
+        "Authorization": f"Bearer {COZE_PAT}",
+        "Content-Type": "application/json"
+    }
+
     payload = {
         "bot_id": COZE_BOT_ID,
-        "user_id": "daily‑energy‑report‑runner",
+        "user_id": "daily_report_task",
         "stream": False,
         "additional_messages": [
             {
                 "role": "user",
-                "content": f"生成{datetime.now().strftime('%Y‑%m‑%d')}新能源早报，严格只输出JSON，禁止多余文字",
+                "content": "生成今日新能源早报",
                 "content_type": "text"
             }
         ]
     }
 
-    resp = requests.post(chat_url, headers=HEADERS, json=payload, timeout=90)
+    resp = requests.post("https://api.coze.cn/v3/chat", json=payload, headers=headers)
     res_json = resp.json()
-    print(f"Coze发起聊天返回: {json.dumps(res_json, ensure_ascii=False)}")
+    print(f"[DEBUG] Coze发起聊天返回: {res_json}")
 
     if res_json.get("code") != 0:
         raise Exception(f"Coze v3/chat调用失败：{res_json}")
 
-    chat_id = res_json["data"]["chat_id"]
+    # ========== 修复：v3接口chat_id对应data["id"] ==========
     conversation_id = res_json["data"]["conversation_id"]
+    chat_id = res_json["data"]["id"]
+    # ======================================================
 
-    # 轮询等待Bot执行完成，最多等待40秒
-    retrieve_url = f"https://api.coze.cn/v3/chat/retrieve?conversation_id={conversation_id}&chat_id={chat_id}"
-    max_loop = 20
+    max_wait_time = 120  # 最大等待2分钟
+    start_time = time.time()
     result_content = None
 
-    for _ in range(max_loop):
-        time.sleep(2)
-        r = requests.get(retrieve_url, headers=HEADERS, timeout=60)
-        j = r.json()
-        status = j["data"]["status"]
-        print(f"轮询状态: {status}")
+    # 轮询等待任务完成
+    while True:
+        if time.time() - start_time > max_wait_time:
+            raise TimeoutError("Coze接口轮询超时，超过2分钟未返回结果")
 
+        poll_url = f"https://api.coze.cn/v3/chat/{chat_id}"
+        poll_resp = requests.get(poll_url, headers=headers)
+        poll_data = poll_resp.json()
+        print(f"[DEBUG] 轮询状态: {poll_data['data']['status']}")
+
+        status = poll_data["data"]["status"]
         if status == "completed":
-            # 获取对话消息列表
-            msg_url = f"https://api.coze.cn/v3/conversation/message/list?conversation_id={conversation_id}"
-            msg_resp = requests.get(msg_url, headers=HEADERS, timeout=60)
-            msg_json = msg_resp.json()
-            if msg_json.get("code") != 0:
-                raise Exception(f"获取消息列表失败 {msg_json}")
-            result_content = msg_json["data"]["messages"][0]["content"]
+            # 提取bot输出消息
+            for msg in poll_data["data"]["messages"]:
+                if msg["role"] == "assistant":
+                    result_content = msg["content"]
+                    break
             break
-        elif status in ("failed", "requires_action", "cancelled"):
-            raise Exception(f"Bot执行异常，status={status}, resp={j}")
+        elif status == "failed":
+            raise Exception(f"Coze执行失败:{poll_data['data'].get('last_error')}")
+        time.sleep(3)
 
-    if result_content is None:
-        raise Exception("Bot执行超时，未获取返回结果")
+    if not result_content:
+        raise Exception("没有获取到Bot返回内容")
 
-    print(f"Bot原始输出:\n{result_content}")
+    print(f"[DEBUG] Bot原始输出:\n{result_content}")
     news_data = json.loads(result_content)
     return news_data
 
