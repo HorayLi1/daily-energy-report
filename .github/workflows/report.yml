@@ -2,7 +2,7 @@ name: 每日新能源早报
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 2 * * *'
+    - cron: '0 0 * * *'
 
 jobs:
   build:
