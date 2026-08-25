@@ -42,13 +42,14 @@ def fetch_news_from_coze():
     start_time = time.time()
     result_content = None
 
-    # 完整带容错轮询逻辑
+    # 完整带容错轮询逻辑【修复接口地址】
     while True:
         if time.time() - start_time > max_wait_time:
             raise TimeoutError("Coze接口轮询超时，超过2分钟未返回结果")
 
-        poll_url = f"https://api.coze.cn/v3/chat/{chat_id}"
-        poll_resp = requests.get(poll_url, headers=headers)
+        poll_url = "https://api.coze.cn/v3/chat/retrieve"
+        params = {"chat_id": chat_id}
+        poll_resp = requests.get(poll_url, headers=headers, params=params)
         poll_data = poll_resp.json()
         print(f"[DEBUG]轮询原始响应: {poll_data}")
 
