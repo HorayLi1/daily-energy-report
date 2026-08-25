@@ -28,7 +28,6 @@ def fetch_news_from_coze():
     }
 
     resp = requests.post("https://api.coze.cn/v3/chat", json=payload, headers=headers, timeout=60)
-    # 修复：先判断http状态码
     if resp.status_code != 200:
         raise Exception(f"Coze v3/chat HTTP错误，status={resp.status_code}, resp={resp.text}")
     res_json = resp.json()
@@ -40,14 +39,20 @@ def fetch_news_from_coze():
     conversation_id = res_json["data"]["conversation_id"]
     chat_id = res_json["data"]["id"]
 
-    max_wait_time = 120
+    # ========= 修改最大等待时间到5分钟，轮询间隔改为5s =========
+    max_wait_time = 300
     start_time = time.time()
 
     # 第一步轮询等待会话完成
     while True:
-        if time.time() - start_time > max_wait_time:
-            raise TimeoutError("Coze接口轮询超时，超过2分钟未返回结果")
-
+        elapsed = time.time() - start_time
+        remain = max_wait_time - elapsed
+        if elapsed > max_wait_time:
+            # 带上chat_id、conversation_id方便扣子后台查日志
+            raise TimeoutError(
+                f"Coze接口轮询超时，超过{max_wait_time}秒未完成。"
+                f"chat_id={chat_id},conversation_id={conversation_id}"
+            )
         poll_url = "https://api.coze.cn/v3/chat/retrieve"
         params = {
             "chat_id": chat_id,
@@ -57,7 +62,7 @@ def fetch_news_from_coze():
         if poll_resp.status_code != 200:
             raise Exception(f"retrieve接口HTTP异常 status={poll_resp.status_code}, text={poll_resp.text}")
         poll_data = poll_resp.json()
-        print(f"[DEBUG]轮询retrieve: {poll_data}")
+        print(f"[DEBUG]轮询retrieve status={poll_data['data']['status']} 已等待{elapsed:.1f}s 剩余{remain:.1f}s")
 
         if poll_data.get("code") != 0:
             raise Exception(f"retrieve接口返回错误：{poll_data}")
@@ -65,13 +70,13 @@ def fetch_news_from_coze():
             raise Exception(f"retrieve缺少data字段:{poll_data}")
 
         status = poll_data["data"]["status"]
-        print(f"[DEBUG] 会话状态: {status}")
 
         if status == "completed":
+            print("[INFO] Bot执行完成，开始拉取消息列表")
             break
         if status == "failed":
             raise Exception(f"Coze执行失败:{poll_data['data'].get('last_error')}")
-        time.sleep(3)
+        time.sleep(5)
 
     # 第二步：会话完成后，单独调用消息列表接口拿messages
     msg_url = "https://api.coze.cn/v3/chat/message/list"
@@ -99,7 +104,7 @@ def fetch_news_from_coze():
 
     print(f"[DEBUG] Bot原始输出:\n{result_content}")
 
-    # ==========核心修复：剥离 ```json ``` markdown代码块标记==========
+    # 剥离 ```json ``` markdown代码块标记
     raw_text = result_content.strip()
     if raw_text.startswith("```json"):
         raw_text = raw_text[7:]
