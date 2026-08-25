@@ -39,39 +39,53 @@ def fetch_news_from_coze():
 
     max_wait_time = 120
     start_time = time.time()
-    result_content = None
 
+    # 第一步轮询等待会话完成
     while True:
         if time.time() - start_time > max_wait_time:
             raise TimeoutError("Coze接口轮询超时，超过2分钟未返回结果")
 
         poll_url = "https://api.coze.cn/v3/chat/retrieve"
-        # 两个参数都必须带上
         params = {
             "chat_id": chat_id,
             "conversation_id": conversation_id
         }
         poll_resp = requests.get(poll_url, headers=headers, params=params)
         poll_data = poll_resp.json()
-        print(f"[DEBUG]轮询原始响应: {poll_data}")
+        print(f"[DEBUG]轮询retrieve: {poll_data}")
 
         if poll_data.get("code") != 0:
-            raise Exception(f"轮询接口返回错误：{poll_data}")
+            raise Exception(f"retrieve接口返回错误：{poll_data}")
         if "data" not in poll_data:
-            raise Exception(f"轮询响应缺少data字段！完整返回:{poll_data}")
+            raise Exception(f"retrieve缺少data字段:{poll_data}")
 
         status = poll_data["data"]["status"]
-        print(f"[DEBUG] 轮询状态: {status}")
+        print(f"[DEBUG] 会话状态: {status}")
 
         if status == "completed":
-            for msg in poll_data["data"]["messages"]:
-                if msg["role"] == "assistant":
-                    result_content = msg["content"]
-                    break
             break
-        elif status == "failed":
+        if status == "failed":
             raise Exception(f"Coze执行失败:{poll_data['data'].get('last_error')}")
         time.sleep(3)
+
+    # 第二步：会话完成后，单独调用消息列表接口拿messages
+    msg_url = "https://api.coze.cn/v3/chat/message/list"
+    msg_params = {
+        "chat_id": chat_id,
+        "conversation_id": conversation_id
+    }
+    msg_resp = requests.get(msg_url, headers=headers, params=msg_params)
+    msg_data = msg_resp.json()
+    print(f"[DEBUG] message/list 返回：{msg_data}")
+
+    if msg_data.get("code") != 0:
+        raise Exception(f"获取消息列表失败 {msg_data}")
+
+    result_content = None
+    for msg in msg_data["data"]:
+        if msg["role"] == "assistant":
+            result_content = msg["content"]
+            break
 
     if not result_content:
         raise Exception("没有获取到Bot返回内容")
