@@ -2,9 +2,11 @@ import requests
 import json
 from datetime import datetime
 import os
+import time
 
 # ============ 环境变量密钥，从Github Actions Secrets读取 ============
 COZE_PAT = os.environ.get("COZE_PAT")
+COZE_BOT_ID = os.environ.get("COZE_BOT_ID")
 PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN")
 
 # 你的Github Pages公开访问链接，替换为你的用户名
@@ -12,57 +14,69 @@ GITHUB_USER = "HorayLi1"
 PUBLIC_HTML_URL = f"https://{GITHUB_USER}.github.io/daily-energy-report/energy_daily_card.html"
 OUTPUT_HTML_FILE = "energy_daily_card.html"
 
-# Coze API配置
-COZE_API_URL = "https://api.coze.cn/v1/chat/completions"
-SYSTEM_PROMPT = '''
-#角色：新能源行业早报编辑
-你的任务：生成今日新能源每日早报。
-监测主题：热蓄电锅炉、镁砖蓄热、温窗蓄热、绿电、风电光伏、储能、虚拟电厂、电力交易、氢能、综合能源、产业政策、项目建设。
-
-严格输出JSON格式，不要输出多余文字，JSON结构如下：
-{
-    "domestic_tech": [{"kicker":"分类标签","title":"新闻标题","desc":"新闻简述","source":"来源","url":"原文链接"}],
-    "international_tech": [],
-    "domestic_industry": [],
-    "international_industry": []
+HEADERS = {
+    "Authorization": f"Bearer {COZE_PAT}",
+    "Content-Type": "application/json"
 }
 
-规则：
-1.检索过去24小时真实资讯；
-2.没有新闻则数组为空；
-3.禁止编造虚假新闻；
-4.小众赛道无资讯返回空数组。
-'''
 
 def fetch_news_from_coze():
-    headers = {
-        "Authorization": f"Bearer {COZE_PAT}",
-        "Content-Type": "application/json"
-    }
+    """调用扣子v3 chat接口获取早报JSON，Bot网页端存放完整System Prompt"""
+    chat_url = "https://api.coze.cn/v3/chat"
     payload = {
-        # 全部改为英文半角短横线！！！
-        "model": "coze-3.5-pro",
-        "messages": [
-            {"role":"system","content":SYSTEM_PROMPT},
-            {"role":"user","content":f"生成{datetime.now().strftime('%Y-%m-%d')}新能源早报新闻数据"}
-        ],
-        "tools": [{"type":"web_search","web_search":{"enable":True}}]
+        "bot_id": COZE_BOT_ID,
+        "user_id": "daily‑energy‑report‑runner",
+        "stream": False,
+        "additional_messages": [
+            {
+                "role": "user",
+                "content": f"生成{datetime.now().strftime('%Y‑%m‑%d')}新能源早报，严格只输出JSON，禁止多余文字",
+                "content_type": "text"
+            }
+        ]
     }
-    resp = requests.post(COZE_API_URL, json=payload, headers=headers)
+
+    resp = requests.post(chat_url, headers=HEADERS, json=payload, timeout=90)
     res_json = resp.json()
-    # 打印调试信息，看接口返回
-    print(f"HTTP status:{resp.status_code}")
-    print(f"Coze返回完整json:{res_json}")
+    print(f"Coze发起聊天返回: {json.dumps(res_json, ensure_ascii=False)}")
 
-    # 容错判断
-    if "error" in res_json:
-        raise Exception(f"Coze接口报错：{res_json['error']}")
-    if "choices" not in res_json:
-        raise Exception(f"无choices字段，响应：{res_json}")
+    if res_json.get("code") != 0:
+        raise Exception(f"Coze v3/chat调用失败：{res_json}")
 
-    content = res_json["choices"][0]["message"]["content"]
-    data = json.loads(content)
-    return data
+    chat_id = res_json["data"]["chat_id"]
+    conversation_id = res_json["data"]["conversation_id"]
+
+    # 轮询等待Bot执行完成，最多等待40秒
+    retrieve_url = f"https://api.coze.cn/v3/chat/retrieve?conversation_id={conversation_id}&chat_id={chat_id}"
+    max_loop = 20
+    result_content = None
+
+    for _ in range(max_loop):
+        time.sleep(2)
+        r = requests.get(retrieve_url, headers=HEADERS, timeout=60)
+        j = r.json()
+        status = j["data"]["status"]
+        print(f"轮询状态: {status}")
+
+        if status == "completed":
+            # 获取对话消息列表
+            msg_url = f"https://api.coze.cn/v3/conversation/message/list?conversation_id={conversation_id}"
+            msg_resp = requests.get(msg_url, headers=HEADERS, timeout=60)
+            msg_json = msg_resp.json()
+            if msg_json.get("code") != 0:
+                raise Exception(f"获取消息列表失败 {msg_json}")
+            result_content = msg_json["data"]["messages"][0]["content"]
+            break
+        elif status in ("failed", "requires_action", "cancelled"):
+            raise Exception(f"Bot执行异常，status={status}, resp={j}")
+
+    if result_content is None:
+        raise Exception("Bot执行超时，未获取返回结果")
+
+    print(f"Bot原始输出:\n{result_content}")
+    news_data = json.loads(result_content)
+    return news_data
+
 
 def build_markdown_report(news):
     today = datetime.now().strftime("%Y年%m月%d日")
@@ -99,6 +113,7 @@ def build_markdown_report(news):
 
     md += ">备注：镁砖蓄热、温窗蓄热属于小众细分赛道，无资讯显示暂无相关资讯。"
     return md
+
 
 def render_html_card(news):
     def render_card_list(news_list):
@@ -175,6 +190,7 @@ def render_html_card(news):
     with open(OUTPUT_HTML_FILE, "w", encoding="utf‑8") as f:
         f.write(html_template)
 
+
 def push_wechat(content_md):
     url = "https://www.pushplus.plus/send"
     payload = {
@@ -185,6 +201,7 @@ def push_wechat(content_md):
     }
     resp = requests.post(url, json=payload)
     print("PushPlus返回：", resp.json())
+
 
 if __name__ == "__main__":
     print("1.调用Coze API获取新闻")
