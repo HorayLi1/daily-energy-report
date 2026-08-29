@@ -2,6 +2,7 @@ import json
 import time
 import requests
 import os
+import re
 
 COZE_PAT = os.getenv("COZE_PAT")
 COZE_BOT_ID = os.getenv("COZE_BOT_ID")
@@ -21,7 +22,7 @@ def fetch_news_from_coze():
         "additional_messages": [
             {
                 "role": "user",
-                "content": "生成今日新能源早报",
+                "content": "生成今日新能源早报，**只输出纯净JSON，不要任何额外文字、解释、markdown**",
                 "content_type": "text"
             }
         ]
@@ -89,35 +90,28 @@ def fetch_news_from_coze():
     if msg_data.get("code") != 0:
         raise Exception(f"获取消息列表失败 {msg_data}")
 
-    news_json_str = None
-    # 遍历全部assistant消息，尝试解析合法新闻json
+    raw_text = ""
+    # 遍历全部assistant消息，合并reasoning_content + content
     for msg in msg_data["data"]:
         if msg.get("role") != "assistant":
             continue
-        # 优先取reasoning_content，其次content
-        candidate_text = msg.get("reasoning_content", "").strip()
-        if not candidate_text:
-            candidate_text = msg.get("content", "").strip()
-        if not candidate_text:
-            continue
-        # 尝试直接加载json
-        try:
-            temp = json.loads(candidate_text)
-            # 判断是不是目标结构
-            if isinstance(temp, dict) and ("domestic_tech" in temp or "domestic_industry" in temp):
-                news_json_str = candidate_text
-                print(f"[DEBUG] ✅ 成功匹配新闻JSON内容")
-                break
-        except json.JSONDecodeError:
-            print(f"[DEBUG] ⚠️本条内容不是合法json，跳过：{candidate_text[:200]}")
-            continue
+        rc = msg.get("reasoning_content", "").strip()
+        ct = msg.get("content", "").strip()
+        raw_text = rc + "\n" + ct
+        print(f"[DEBUG] 原始assistant文本:\n{raw_text}")
+        break
 
-    if not news_json_str:
-        raise Exception("遍历所有消息，未找到符合格式的结构化新闻JSON")
+    # 正则提取{}包裹的json块（核心修复！兼容bot附带多余文字的场景）
+    json_match = re.search(r"\{[\s\S]*\}", raw_text)
+    if not json_match:
+        raise Exception("未找到任何{}包裹的JSON内容")
+    json_str = json_match.group()
+    try:
+        news_data = json.loads(json_str)
+    except json.JSONDecodeError as e:
+        raise Exception(f"提取到的内容不是合法JSON：{e}, 内容={json_str[:500]}")
 
-    print(f"[DEBUG] Bot最终json原始输出:\n{news_json_str}")
-    news_data = json.loads(news_json_str)
-    print(f"[DEBUG] 解析后的news_data: {news_data}")
+    print(f"[DEBUG] ✅ 成功解析新闻JSON: {news_data}")
     return news_data
 
 
