@@ -39,16 +39,13 @@ def fetch_news_from_coze():
     conversation_id = res_json["data"]["conversation_id"]
     chat_id = res_json["data"]["id"]
 
-    # ========= 修改最大等待时间到5分钟，轮询间隔改为5s =========
     max_wait_time = 300
     start_time = time.time()
 
-    # 第一步轮询等待会话完成
     while True:
         elapsed = time.time() - start_time
         remain = max_wait_time - elapsed
         if elapsed > max_wait_time:
-            # 带上chat_id、conversation_id方便扣子后台查日志
             raise TimeoutError(
                 f"Coze接口轮询超时，超过{max_wait_time}秒未完成。"
                 f"chat_id={chat_id},conversation_id={conversation_id}"
@@ -62,7 +59,7 @@ def fetch_news_from_coze():
         if poll_resp.status_code != 200:
             raise Exception(f"retrieve接口HTTP异常 status={poll_resp.status_code}, text={poll_resp.text}")
         poll_data = poll_resp.json()
-        print(f"[DEBUG]轮询retrieve status={poll_data['data']['status']} 已等待{elapsed:.1f}s 剩余{remain:.1f}s")
+        print(f"[DEBUG]轮询retrieve status={poll_data['data']['status']} 已等待{elapsed:.1f}s")
 
         if poll_data.get("code") != 0:
             raise Exception(f"retrieve接口返回错误：{poll_data}")
@@ -78,7 +75,6 @@ def fetch_news_from_coze():
             raise Exception(f"Coze执行失败:{poll_data['data'].get('last_error')}")
         time.sleep(5)
 
-    # 第二步：会话完成后，单独调用消息列表接口拿messages
     msg_url = "https://api.coze.cn/v3/chat/message/list"
     msg_params = {
         "chat_id": chat_id,
@@ -94,52 +90,58 @@ def fetch_news_from_coze():
         raise Exception(f"获取消息列表失败 {msg_data}")
 
     result_content = None
+    # 重点修复：跳过function_call，只取最终answer的json消息
     for msg in msg_data["data"]:
-        if msg.get("role") == "assistant" and msg.get("content"):
+        if msg.get("role") == "assistant" and msg.get("content") and msg.get("type") != "function_call":
             result_content = msg["content"]
             break
 
     if not result_content:
-        raise Exception("没有获取到Bot返回内容")
+        raise Exception("没有获取到Bot最终结构化JSON新闻内容")
 
-    print(f"[DEBUG] Bot原始输出:\n{result_content}")
-
-    # 剥离 ```json ``` markdown代码块标记
-    raw_text = result_content.strip()
-    if raw_text.startswith("```json"):
-        raw_text = raw_text[7:]
-    if raw_text.endswith("```"):
-        raw_text = raw_text[:-3]
-    raw_text = raw_text.strip()
-    news_data = json.loads(raw_text)
+    print(f"[DEBUG] Bot最终json原始输出:\n{result_content}")
+    news_data = json.loads(result_content)
+    print(f"[DEBUG] 解析后的news_data: {news_data}")
     return news_data
 
 
 def render_markdown(news_data):
     """
-    修改后：每条新闻输出【标题、概括、网址链接、发布时间】
+    输出格式：标题、概括、网址链接、发布时间，保留四大板块
     """
+    today = time.strftime('%Y-%m-%d')
     md_lines = []
-    md_lines.append(f"# 新能源每日早报 {time.strftime('%Y-%m-%d')}\n")
+    md_lines.append(f"# 新能源每日早报 {today}")
+    md_lines.append("")
 
-    # 兼容你原有4个分类：国内技术 / 国内行业 / 国际技术 / 国际行业
-    all_news = []
-    all_news.extend(news_data.get("domestic_tech", []))
-    all_news.extend(news_data.get("domestic_industry", []))
-    all_news.extend(news_data.get("international_tech", []))
-    all_news.extend(news_data.get("international_industry", []))
+    sections = [
+        ("## 🧪国内技术新闻", news_data.get("domestic_tech", [])),
+        ("## 🏭国内行业新闻", news_data.get("domestic_industry", [])),
+        ("## 🌍国际技术新闻", news_data.get("international_tech", [])),
+        ("## 🌐国际行业新闻", news_data.get("international_industry", []))
+    ]
 
-    for idx, item in enumerate(all_news, 1):
-        title = item.get("title", "")
-        summary = item.get("desc", "")   # 概括，沿用原来desc字段
-        url = item.get("url", "")
-        publish_time = item.get("publish_time", "未知时间") # 发布时间
+    for section_title, news_list in sections:
+        if not news_list:
+            continue
+        md_lines.append(section_title)
+        md_lines.append("")
+        for idx, item in enumerate(news_list, 1):
+            title = item.get("title", "")
+            summary = item.get("desc", "")
+            url = item.get("url", "")
+            # 从desc里提取时间，如果没有就显示未知
+            publish_time = "未知时间"
+            if "发布日期" in summary:
+                publish_time = summary.split("发布日期")[-1].strip("。，")
+            md_lines.append(f"{idx}. **{title}**")
+            md_lines.append(f"📅 发布时间：{publish_time}")
+            md_lines.append(f"📝 概括：{summary}")
+            md_lines.append(f"🔗 链接：{url}")
+            md_lines.append("")
 
-        md_lines.append(f"**{idx}. {title}**")
-        md_lines.append(f"📅 发布时间：{publish_time}")
-        md_lines.append(f"📝 概括：{summary}")
-        md_lines.append(f"🔗 链接：{url}\n")
-
+    if len(md_lines) <= 2:
+        md_lines.append("暂无今日新能源新闻")
     return "\n".join(md_lines)
 
 
@@ -162,17 +164,23 @@ if __name__ == "__main__":
     print(f"[DEBUG] COZE_BOT_ID raw value: '{COZE_BOT_ID}'")
     print(f"[DEBUG] COZE_PAT is None? {COZE_PAT is None}")
 
-    print("1.调用Coze API获取新闻")
-    news_data = fetch_news_from_coze()
+    try:
+        print("1.调用Coze API获取新闻")
+        news_data = fetch_news_from_coze()
 
-    print("2.渲染Markdown报告")
-    report_md = render_markdown(news_data)
+        print("2.渲染Markdown报告")
+        report_md = render_markdown(news_data)
+        print(f"[DEBUG] 最终推送md:\n{report_md}")
 
-    with open("daily_report.md", "w", encoding="utf-8") as f:
-        f.write(report_md)
-    print("[INFO]已生成 daily_report.md")
+        with open("daily_report.md", "w", encoding="utf-8") as f:
+            f.write(report_md)
+        print("[INFO]已生成 daily_report.md")
 
-    print("3.执行微信推送")
-    push_plus_send(report_md)
+        print("3.执行微信推送")
+        push_plus_send(report_md)
 
-    print("✅脚本全部执行完成")
+        print("✅脚本全部执行完成")
+    except Exception as e:
+        err_msg = f"早报生成异常：{str(e)}"
+        print(f"[ERROR] {err_msg}")
+        push_plus_send(err_msg)
