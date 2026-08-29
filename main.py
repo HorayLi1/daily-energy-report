@@ -89,26 +89,40 @@ def fetch_news_from_coze():
     if msg_data.get("code") != 0:
         raise Exception(f"获取消息列表失败 {msg_data}")
 
-    result_content = None
-    # 重点修复：跳过function_call，只取最终answer的json消息
+    news_json_str = None
+    # 遍历全部assistant消息，尝试解析合法新闻json
     for msg in msg_data["data"]:
-        if msg.get("role") == "assistant" and msg.get("content") and msg.get("type") != "function_call":
-            result_content = msg["content"]
-            break
+        if msg.get("role") != "assistant":
+            continue
+        # 优先取reasoning_content，其次content
+        candidate_text = msg.get("reasoning_content", "").strip()
+        if not candidate_text:
+            candidate_text = msg.get("content", "").strip()
+        if not candidate_text:
+            continue
+        # 尝试直接加载json
+        try:
+            temp = json.loads(candidate_text)
+            # 判断是不是目标结构
+            if isinstance(temp, dict) and ("domestic_tech" in temp or "domestic_industry" in temp):
+                news_json_str = candidate_text
+                print(f"[DEBUG] ✅ 成功匹配新闻JSON内容")
+                break
+        except json.JSONDecodeError:
+            print(f"[DEBUG] ⚠️本条内容不是合法json，跳过：{candidate_text[:200]}")
+            continue
 
-    if not result_content:
-        raise Exception("没有获取到Bot最终结构化JSON新闻内容")
+    if not news_json_str:
+        raise Exception("遍历所有消息，未找到符合格式的结构化新闻JSON")
 
-    print(f"[DEBUG] Bot最终json原始输出:\n{result_content}")
-    news_data = json.loads(result_content)
+    print(f"[DEBUG] Bot最终json原始输出:\n{news_json_str}")
+    news_data = json.loads(news_json_str)
     print(f"[DEBUG] 解析后的news_data: {news_data}")
     return news_data
 
 
 def render_markdown(news_data):
-    """
-    输出格式：标题、概括、网址链接、发布时间，保留四大板块
-    """
+    """适配当前JSON结构：domestic_tech / domestic_industry / international_tech / international_industry"""
     today = time.strftime('%Y-%m-%d')
     md_lines = []
     md_lines.append(f"# 新能源每日早报 {today}")
@@ -120,27 +134,26 @@ def render_markdown(news_data):
         ("## 🌍国际技术新闻", news_data.get("international_tech", [])),
         ("## 🌐国际行业新闻", news_data.get("international_industry", []))
     ]
-
+    has_content = False
     for section_title, news_list in sections:
         if not news_list:
             continue
+        has_content = True
         md_lines.append(section_title)
         md_lines.append("")
         for idx, item in enumerate(news_list, 1):
+            kicker = item.get("kicker", "")
             title = item.get("title", "")
             summary = item.get("desc", "")
+            source = item.get("source", "")
             url = item.get("url", "")
-            # 从desc里提取时间，如果没有就显示未知
-            publish_time = "未知时间"
-            if "发布日期" in summary:
-                publish_time = summary.split("发布日期")[-1].strip("。，")
-            md_lines.append(f"{idx}. **{title}**")
-            md_lines.append(f"📅 发布时间：{publish_time}")
-            md_lines.append(f"📝 概括：{summary}")
-            md_lines.append(f"🔗 链接：{url}")
+            md_lines.append(f"{idx}. **【{kicker}】{title}**")
+            md_lines.append(f"📰 来源：{source}")
+            md_lines.append(f"📝 摘要：{summary}")
+            md_lines.append(f"🔗 原文链接：{url}")
             md_lines.append("")
 
-    if len(md_lines) <= 2:
+    if not has_content:
         md_lines.append("暂无今日新能源新闻")
     return "\n".join(md_lines)
 
@@ -165,22 +178,12 @@ if __name__ == "__main__":
     print(f"[DEBUG] COZE_PAT is None? {COZE_PAT is None}")
 
     try:
-        print("1.调用Coze API获取新闻")
         news_data = fetch_news_from_coze()
-
-        print("2.渲染Markdown报告")
-        report_md = render_markdown(news_data)
-        print(f"[DEBUG] 最终推送md:\n{report_md}")
-
-        with open("daily_report.md", "w", encoding="utf-8") as f:
-            f.write(report_md)
-        print("[INFO]已生成 daily_report.md")
-
-        print("3.执行微信推送")
-        push_plus_send(report_md)
-
-        print("✅脚本全部执行完成")
+        md_text = render_markdown(news_data)
+        print(f"[DEBUG] 最终渲染markdown:\n{md_text}")
+        push_plus_send(md_text)
+        print("[SUCCESS] 早报生成并推送完成")
     except Exception as e:
-        err_msg = f"早报生成异常：{str(e)}"
+        err_msg = f"新能源早报任务异常：{str(e)}"
         print(f"[ERROR] {err_msg}")
         push_plus_send(err_msg)
