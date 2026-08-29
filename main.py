@@ -116,36 +116,29 @@ def fetch_news_from_coze():
 
 
 def render_markdown(news_data):
+    """
+    修改后：每条新闻输出【标题、概括、网址链接、发布时间】
+    """
     md_lines = []
     md_lines.append(f"# 新能源每日早报 {time.strftime('%Y-%m-%d')}\n")
 
-    md_lines.append("## 🧪国内技术新闻\n")
-    for item in news_data.get("domestic_tech", []):
-        md_lines.append(f"**{item['title']}**")
-        md_lines.append(f"> 分类：{item['kicker']}｜来源：{item['source']}")
-        md_lines.append(f"{item['desc']}")
-        md_lines.append(f"链接：{item['url']}\n")
+    # 兼容你原有4个分类：国内技术 / 国内行业 / 国际技术 / 国际行业
+    all_news = []
+    all_news.extend(news_data.get("domestic_tech", []))
+    all_news.extend(news_data.get("domestic_industry", []))
+    all_news.extend(news_data.get("international_tech", []))
+    all_news.extend(news_data.get("international_industry", []))
 
-    md_lines.append("## 🏭国内行业新闻\n")
-    for item in news_data.get("domestic_industry", []):
-        md_lines.append(f"**{item['title']}**")
-        md_lines.append(f"> 分类：{item['kicker']}｜来源：{item['source']}")
-        md_lines.append(f"{item['desc']}")
-        md_lines.append(f"链接：{item['url']}\n")
+    for idx, item in enumerate(all_news, 1):
+        title = item.get("title", "")
+        summary = item.get("desc", "")   # 概括，沿用原来desc字段
+        url = item.get("url", "")
+        publish_time = item.get("publish_time", "未知时间") # 发布时间
 
-    md_lines.append("## 🌍国际技术新闻\n")
-    for item in news_data.get("international_tech", []):
-        md_lines.append(f"**{item['title']}**")
-        md_lines.append(f"> 分类：{item['kicker']}｜来源：{item['source']}")
-        md_lines.append(f"{item['desc']}")
-        md_lines.append(f"链接：{item['url']}\n")
-
-    md_lines.append("## 🌐国际行业新闻\n")
-    for item in news_data.get("international_industry", []):
-        md_lines.append(f"**{item['title']}**")
-        md_lines.append(f"> 分类：{item['kicker']}｜来源：{item['source']}")
-        md_lines.append(f"{item['desc']}")
-        md_lines.append(f"链接：{item['url']}\n")
+        md_lines.append(f"**{idx}. {title}**")
+        md_lines.append(f"📅 发布时间：{publish_time}")
+        md_lines.append(f"📝 概括：{summary}")
+        md_lines.append(f"🔗 链接：{url}\n")
 
     return "\n".join(md_lines)
 
